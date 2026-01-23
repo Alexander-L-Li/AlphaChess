@@ -1,6 +1,5 @@
 rl_chess_model_latest.pth
 supervised_chess_model.pth
-assets
 
 # Large dataset files
 *.pt
