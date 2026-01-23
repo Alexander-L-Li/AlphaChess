@@ -1,0 +1,7 @@
+numpy>=1.24
+python-chess>=1.999
+torch>=2.0
+zstandard
+tqdm
+pygame
+requests
