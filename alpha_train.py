@@ -24,7 +24,6 @@ def execute_episode(mcts, mapper):
 
     while not board.is_game_over():
         # 1. Run MCTS (Warm Start)
-        # We pass the 'mcts_root' to reuse the previous subtree if available
         root = mcts.run_self_play_simulation(board, num_simulations=MCTS_SIMS, root=mcts_root)
         
         # 2. Extract Data
