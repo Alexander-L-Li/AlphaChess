@@ -8,7 +8,7 @@ from utils import ActionMapper
 
 mapper = ActionMapper()
 
-def process_lichess_data(file_path, max_games=10000, elo_threshold=2000):
+def process_lichess_data(file_path, max_games=20000, elo_threshold=2000):
     """
     Reads a .zst PGN file and saves a list of (FEN, move_index, result).
     """
@@ -65,7 +65,7 @@ def process_lichess_data(file_path, max_games=10000, elo_threshold=2000):
 
     print(f"Processed {len(data)} moves from {count} games.")
     print("Saving to disk...")
-    torch.save(data, "lichess_dataset_10k.pt")
+    torch.save(data, "lichess_dataset_20k.pt")
     print("Done!")
 
 process_lichess_data("/Users/alxli/Documents/lichess_db_standard_rated_2025-12.pgn.zst")

@@ -10,42 +10,32 @@ from utils import ActionMapper, board_to_tensor
 from nn import ChessNet
 
 # --- Hyperparameters ---
-ITERATIONS = 10        # Total loops of Self-Play -> Train
+ITERATIONS = 5        # Total loops of Self-Play -> Train
 GAMES_PER_ITER = 50    # Games to play per loop (Increase if you have time)
-MCTS_SIMS = 100         # Lower sims for speed (Standard is 800, too slow for Mac)
+MCTS_SIMS = 800         # Lower sims for speed (Standard is 800, too slow for Mac)
 BATCH_SIZE = 64
-EPOCHS = 10             # Training epochs on the new data per iteration
-MAX_BUFFER_SIZE = 2500 # Keep last 5000 games in memory (Replay Buffer)
+EPOCHS = 10            # Training epochs on the new data per iteration
+MAX_BUFFER_SIZE = 250 # Keep last 5000 games in memory (Replay Buffer)
 
 def execute_episode(mcts, mapper):
-    """
-    Plays one single game of Self-Play (Model vs Model).
-    Returns: A list of training examples [(board_tensor, policy_target, value_target)]
-    """
     examples = []
     board = chess.Board()
-    mcts_root = None # Can be reused in optimized versions, but reset for now
-    
+    mcts_root = None  # Start with no tree
+
     while not board.is_game_over():
-        # 1. Run MCTS with Noise
-        root = mcts.run_self_play_simulation(board, num_simulations=MCTS_SIMS)
+        # 1. Run MCTS (Warm Start)
+        # We pass the 'mcts_root' to reuse the previous subtree if available
+        root = mcts.run_self_play_simulation(board, num_simulations=MCTS_SIMS, root=mcts_root)
         
-        # 2. Extract Training Data (The "Improved" Policy)
-        # We want the Neural Net to predict the Visit Counts (N), not the raw Prior (P)
+        # 2. Extract Data
         visit_counts = [child.visit_count for child in root.children.values()]
         moves = [move for move in root.children.keys()]
-        
-        # Normalize visits to get a probability distribution (pi)
         sum_visits = sum(visit_counts)
         pi = [v / sum_visits for v in visit_counts]
         
-        # Store data: (Board State, Target Policy, Placeholder Value)
-        # We don't know the Winner yet, so we put None for value
         examples.append([board.copy(), moves, pi, None])
         
-        # 3. Pick a move
-        # Early in the game (first 30 moves), pick randomly based on 'pi' (Temperature=1)
-        # Later in the game, pick the best move deterministically (Temperature=0)
+        # 3. Pick Move
         if len(board.move_stack) < 30:
             chosen_move = np.random.choice(moves, p=pi)
         else:
@@ -53,30 +43,27 @@ def execute_episode(mcts, mapper):
             
         board.push(chosen_move)
         
-    # 4. Game Ended - Assign Value
+        # --- OPTIMIZATION: Subtree Reuse ---
+        if chosen_move in root.children:
+            mcts_root = root.children[chosen_move]
+            mcts_root.parent = None  # Detach from old tree to allow garbage collection
+        else:
+            mcts_root = None  # Fallback (shouldn't happen in standard self-play)
+            
+    # 4. Game Over Logic (Unchanged)
     outcome = board.outcome()
-    if outcome.winner is None: 
-        result = 0 # Draw
-    else:
-        # 1 if White won, -1 if Black won
-        result = 1 if outcome.winner == chess.WHITE else -1
+    if outcome.winner is None: result = 0
+    else: result = 1 if outcome.winner == chess.WHITE else -1
         
-    # 5. Backfill the result to all examples
     processed_examples = []
     for state, moves, pi, _ in examples:
-        # Perspective: If 'state' turn was White, and White won, value is +1.
-        # If 'state' turn was Black, and White won, value is -1 (Loss for Black).
-        if state.turn == chess.WHITE:
-            player_result = result
-        else:
-            player_result = -result
+        if state.turn == chess.WHITE: player_result = result
+        else: player_result = -result
             
-        # Convert moves/pi to the full vocabulary vector
         pi_vector = np.zeros(mapper.vocab_size, dtype=np.float32)
         for i, move in enumerate(moves):
             idx = mapper.encode(move)
-            if idx is not None:
-                pi_vector[idx] = pi[i]
+            if idx is not None: pi_vector[idx] = pi[i]
                 
         processed_examples.append((board_to_tensor(state), pi_vector, player_result))
         
@@ -92,7 +79,7 @@ def train(model, replay_buffer, device, epochs=10):
         device: CPU or MPS device.
         epochs: How many times to pass over the data (Hyperparameter).
     """
-    optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     mse = nn.MSELoss()
     
     model.train()
@@ -149,13 +136,13 @@ def main():
     for i in range(ITERATIONS):
         print(f"--- Iteration {i+1}/{ITERATIONS} ---")
         
-        # Phase 1: Self-Play (Gather Data)
-        print("Self-Playing...", end="", flush=True)
+        # Phase 1: Self-Play
+        print("Self-Playing...")
         new_examples = []
         for g in range(GAMES_PER_ITER):
             game_data = execute_episode(mcts, mapper)
             new_examples.extend(game_data)
-            print(f".", end="", flush=True)
+            print(f"Game {g} Complete")
 
         replay_buffer.extend(new_examples)
         print(f"\nBuffer size: {len(replay_buffer)}")

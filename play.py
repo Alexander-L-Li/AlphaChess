@@ -168,7 +168,7 @@ def main():
     model = ChessNet(action_size=mapper.vocab_size).to(device)
     
     try:
-        model.load_state_dict(torch.load("rl_model_iter_20.pth", map_location=device))
+        model.load_state_dict(torch.load("rl_chess_model_latest.pth", map_location=device))
         model.eval()
     except FileNotFoundError:
         print("No model found. Please run training first!")

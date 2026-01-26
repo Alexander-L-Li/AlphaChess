@@ -66,7 +66,7 @@ class MCTS:
         self.device = device
         self.mapper = mapper
         
-    def search(self, root_state, num_simulations=100):
+    def search(self, root_state, num_simulations=200):
         root = Node(root_state)
         
         for _ in range(num_simulations):
@@ -102,17 +102,17 @@ class MCTS:
         if outcome.winner == board.turn: return 1
         return -1
 
-    def run_self_play_simulation(self, root_state, num_simulations=100):
+    def run_self_play_simulation(self, root_state, num_simulations=200, root=None):
         """
         Special search for training: Adds noise to the root to encourage exploration.
         """
-        root = Node(root_state)
+        if root is None:
+            root = Node(root_state)
         
-        # 1. Add Dirichlet Noise to Root Node (Only at the start of search)
-        # This makes the model try moves it might otherwise ignore
+        # 1. Add Dirichlet Noise to (new) root
         self._add_dirichlet_noise(root, root_state)
 
-        # 2. Standard Search Loop
+        # 2. Search loop
         for _ in range(num_simulations):
             node = root
             while node.is_expanded():
