@@ -130,6 +130,13 @@ def draw_pieces(screen, board):
                 screen.blit(IMAGES[piece_char], pygame.Rect(col*SQ_SIZE, row*SQ_SIZE, SQ_SIZE, SQ_SIZE))
 
 def highlight_square(screen, square):
+    """
+    Highlight a selected square with a semi-transparent overlay.
+
+    Args:
+        screen: The pygame display surface.
+        square: The chess square index to highlight (0-63), or None.
+    """
     if square is not None:
         col = chess.square_file(square)
         row = 7 - chess.square_rank(square)
@@ -155,6 +162,12 @@ def get_ai_move(model, board, mapper, device):
     return best_move
 
 def main():
+    """
+    Main entry point for the interactive chess game.
+
+    Initializes pygame, loads the trained model, and runs the game loop
+    where a human player competes against the AI.
+    """
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption('My Chess Engine (MCTS)')
@@ -168,7 +181,7 @@ def main():
     model = ChessNet(action_size=mapper.vocab_size).to(device)
     
     try:
-        model.load_state_dict(torch.load("rl_chess_model_latest.pth", map_location=device))
+        model.load_state_dict(torch.load("modal_model.pth", map_location=device))
         model.eval()
     except FileNotFoundError:
         print("No model found. Please run training first!")
