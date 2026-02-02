@@ -1,9 +1,9 @@
 import torch
 import chess
 import numpy as np
-from utils import ActionMapper, board_to_tensor
-from nn import ChessNet
-from mcts import MCTS, predict_masked
+from utils import ActionMapper, board_to_tensor, INPUT_PLANES
+from nn import ChessNet, DEFAULT_RES_BLOCKS, DEFAULT_CHANNELS
+from mcts import BatchedMCTS, predict_masked
 import pygame
 import os
 import sys
@@ -14,6 +14,11 @@ WIDTH, HEIGHT = 600, 600
 SQ_SIZE = WIDTH // 8
 MAX_FPS = 15
 IMAGES = {}
+
+# Model configuration (must match training)
+NUM_RES_BLOCKS = DEFAULT_RES_BLOCKS
+NUM_CHANNELS = DEFAULT_CHANNELS
+USE_SE = True
 
 PIECE_IMAGE_DIR = Path(__file__).resolve().parent / "assets" / "pieces"
 # Map python-chess piece symbols -> local filenames.
@@ -149,7 +154,7 @@ def get_ai_move(model, board, mapper, device):
     """Wrapper to run MCTS and get the best move."""
     print("AI is thinking...")
     # Adjust simulations: 50=Fast/Weak, 200=Decent, 800=Strong(Slow)
-    mcts = MCTS(model, device, mapper)
+    mcts = BatchedMCTS(model, device, mapper)
     root = mcts.search(board, num_simulations=800)
     
     best_move = None
@@ -176,15 +181,37 @@ def main():
     # 1. Load AI
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
-    
+
     mapper = ActionMapper()
-    model = ChessNet(action_size=mapper.vocab_size).to(device)
-    
-    try:
-        model.load_state_dict(torch.load("modal_model.pth", map_location=device))
-        model.eval()
-    except FileNotFoundError:
-        print("No model found. Please run training first!")
+    model = ChessNet(
+        action_size=mapper.vocab_size,
+        input_channels=INPUT_PLANES,
+        num_res_blocks=NUM_RES_BLOCKS,
+        num_channels=NUM_CHANNELS,
+        use_se=USE_SE
+    ).to(device)
+
+    # Try to load best model first, then fall back to latest
+    model_paths = ["rl_chess_model_best.pth", "rl_chess_model_latest.pth", "rl_chess_model_final.pth", "supervised_chess_model.pth"]
+    loaded = False
+    for model_path in model_paths:
+        if os.path.exists(model_path):
+            try:
+                data = torch.load(model_path, map_location=device, weights_only=False)
+                # Handle both checkpoint format and raw state_dict
+                if isinstance(data, dict) and 'model_state_dict' in data:
+                    model.load_state_dict(data['model_state_dict'])
+                else:
+                    model.load_state_dict(data)
+                model.eval()
+                print(f"Loaded model from {model_path}")
+                loaded = True
+                break
+            except Exception as e:
+                print(f"Could not load {model_path}: {e}")
+
+    if not loaded:
+        print("No compatible model found. Please run training first!")
         return
 
     # 2. Setup Game

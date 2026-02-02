@@ -115,126 +115,6 @@ class Node:
             self.parent.backpropagate(-value)
 
 
-class MCTS:
-    """Standard Monte Carlo Tree Search implementation with neural network guidance."""
-
-    def __init__(self, model, device, mapper):
-        """
-        Initialize the MCTS engine.
-
-        Args:
-            model: The neural network model for position evaluation.
-            device: Torch device (CPU/MPS/CUDA) for inference.
-            mapper: ActionMapper for converting moves to/from indices.
-        """
-        self.model = model
-        self.device = device
-        self.mapper = mapper
-
-    def search(self, root_state, num_simulations=200):
-        """
-        Run MCTS from the given position.
-
-        Args:
-            root_state: The chess.Board position to search from.
-            num_simulations: Number of MCTS simulations to run.
-
-        Returns:
-            The root Node of the search tree with visit counts.
-        """
-        root = Node(root_state)
-
-        for _ in range(num_simulations):
-            node = root
-            
-            # 1. Selection
-            while node.is_expanded():
-                node = node.select_child()
-                
-            # Check if game ended
-            if node.state.is_game_over():
-                # Get true result: 1=win, -1=loss, 0=draw
-                # Note: This logic needs careful implementation based on whose turn it is
-                value = self.get_game_result(node.state)
-                node.backpropagate(value)
-                continue
-            
-            # 2. Evaluation (Neural Net)
-            policy_preds, value = predict_masked(self.model, node.state, self.device, self.mapper)
-                
-            # 3. Expansion
-            node.expand(policy_preds)
-            
-            # 4. Backpropagation
-            node.backpropagate(value)
-            
-        return root # Return the tree to pick the best move
-        
-    def get_game_result(self, board):
-        """
-        Get the game result from the perspective of the player to move.
-
-        Args:
-            board: The chess.Board in a terminal state.
-
-        Returns:
-            1 for win, -1 for loss, 0 for draw.
-        """
-        # Simplified result handling
-        outcome = board.outcome()
-        if outcome.winner is None: return 0
-        if outcome.winner == board.turn: return 1
-        return -1
-
-    def run_self_play_simulation(self, root_state, num_simulations=200, root=None):
-        """
-        Special search for training: Adds noise to the root to encourage exploration.
-        """
-        if root is None:
-            root = Node(root_state)
-        
-        # 1. Add Dirichlet Noise to (new) root
-        self._add_dirichlet_noise(root, root_state)
-
-        # 2. Search loop
-        for _ in range(num_simulations):
-            node = root
-            while node.is_expanded():
-                node = node.select_child()
-            
-            if node.state.is_game_over():
-                value = self.get_game_result(node.state)
-                node.backpropagate(value)
-                continue
-            
-            policy_preds, value = predict_masked(self.model, node.state, self.device, self.mapper)
-            node.expand(policy_preds)
-            node.backpropagate(value)
-            
-        return root
-
-    def _add_dirichlet_noise(self, node, board):
-        """
-        AlphaZero mechanic: Adds random noise to the prior probabilities P(s,a)
-        at the root node.
-        """
-        # Ensure node is expanded first so we have children
-        policy_preds, _ = predict_masked(self.model, board, self.device, self.mapper)
-        node.expand(policy_preds)
-        
-        # Parameters used by AlphaZero for Chess
-        epsilon = 0.25  # How much noise to mix in (25% noise, 75% original net)
-        alpha = 0.3     # Shape of noise (0.3 is standard for Chess)
-        
-        moves = list(node.children.keys())
-        noise = np.random.dirichlet([alpha] * len(moves))
-        
-        for i, move in enumerate(moves):
-            child = node.children[move]
-            # Mix: New_Prior = (0.75 * Old_Prior) + (0.25 * Noise)
-            child.prior = (1 - epsilon) * child.prior + epsilon * noise[i]
-
-
 def predict_masked(model, board, device, mapper):
     """
     Runs the model and returns a dictionary {chess.Move: probability}
@@ -267,7 +147,7 @@ def predict_masked(model, board, device, mapper):
     # We only care about the logits for legal moves
     legal_logits = policy_logits[legal_indices]
     
-    # Numerical stability shift (subtract max to prevent overflow)
+    # Numerical stability shift (subtract max to prevent overflow) s
     exp_logits = np.exp(legal_logits - np.max(legal_logits))
     probs = exp_logits / np.sum(exp_logits)
     
@@ -503,7 +383,6 @@ class BatchedMCTS:
                         valid_moves.append(move)
 
                 if legal_indices:
-                    # GPU softmax
                     legal_indices_tensor = torch.tensor(legal_indices, device=self.device)
                     legal_logits = logits[legal_indices_tensor]
                     probs = torch.softmax(legal_logits, dim=0).cpu().numpy()

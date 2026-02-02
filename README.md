@@ -1,6 +1,6 @@
 # AlphaChess
 
-An AlphaZero-style chess engine built from scratch using PyTorch. The engine combines a convolutional neural network with Monte Carlo Tree Search (MCTS) to play chess.
+An AlphaZero-style chess engine built from scratch using PyTorch. The engine combines a convolutional neural network with Monte Carlo Tree Search (MCTS) to play chess. The original AlphaZero by Google Deepmind performed approximately 44 million games of self-play during its training for chess. It accomplished this in just 4 hours using 5,000 first-generation TPUs.
 
 ## Features
 
@@ -40,16 +40,19 @@ pip install -r requirements.txt
 ### Training
 
 1. **Supervised Pre-training** (optional but recommended):
+
    ```bash
    python train.py
    ```
 
 2. **Self-Play Reinforcement Learning** (local):
+
    ```bash
    python alpha_train.py
    ```
 
 3. **Cloud Training on Modal** (recommended for full training):
+
    ```bash
    # Install Modal CLI
    pip install modal
@@ -87,6 +90,7 @@ Click to select a piece, then click the destination square to move. The AI will 
 ### Evaluation
 
 Evaluate the model against Stockfish:
+
 ```bash
 python eval.py
 ```
@@ -124,6 +128,7 @@ python eval.py
 ## Cloud Training Architecture
 
 The Modal deployment (`modal_app.py`) provides:
+
 - Persistent volume for models and checkpoints
 - Automatic checkpoint saves after each iteration
 - Graceful timeout handling (exits before 24hr Modal limit)

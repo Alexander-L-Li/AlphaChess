@@ -23,9 +23,9 @@ import chess
 import chess.engine
 import torch
 
-from mcts import MCTS
-from nn import ChessNet
-from utils import ActionMapper
+from mcts import BatchedMCTS
+from nn import ChessNet, DEFAULT_RES_BLOCKS, DEFAULT_CHANNELS
+from utils import ActionMapper, INPUT_PLANES
 
 
 # Approximate ELO mapping for Stockfish skill levels
@@ -34,15 +34,15 @@ STOCKFISH_PATH = "./stockfish"
 MODEL_PATH = "rl_chess_model_latest.pth"
 
 SKILL_LEVEL_ELO = {
-    0: 800,
-    1: 1000,
-    2: 1200,
-    3: 1400,
-    4: 1700,
-    5: 2000,
-    6: 2300,
-    7: 2700,
-    8: 3000
+    0: 900,
+    1: 1100,
+    2: 1400,
+    3: 1700,
+    4: 2000,
+    5: 2300,
+    6: 2600,
+    7: 2900,
+    8: 3200
 }
 
 
@@ -51,7 +51,7 @@ class GameResult:
     """Result of a single game."""
     winner: Optional[chess.Color]  # None for draw
     model_color: chess.Color
-    moves: int
+    moves: int  # Full moves (both white and black = 1 move)
     termination: str
 
     @property
@@ -122,7 +122,7 @@ class StockfishEvaluator:
         self.device = self._get_device()
         self.mapper = ActionMapper()
         self.model = self._load_model()
-        self.mcts = MCTS(self.model, self.device, self.mapper)
+        self.mcts = BatchedMCTS(self.model, self.device, self.mapper)
 
     def _get_device(self) -> torch.device:
         """Get the best available device."""
@@ -134,10 +134,23 @@ class StockfishEvaluator:
 
     def _load_model(self) -> ChessNet:
         """Load the trained model."""
-        model = ChessNet(action_size=self.mapper.vocab_size).to(self.device)
-        model.load_state_dict(
-            torch.load(self.model_path, map_location=self.device, weights_only=True)
-        )
+        model = ChessNet(
+            action_size=self.mapper.vocab_size,
+            input_channels=INPUT_PLANES,
+            num_res_blocks=DEFAULT_RES_BLOCKS,
+            num_channels=DEFAULT_CHANNELS,
+            use_se=True
+        ).to(self.device)
+
+        # Load weights - handle both checkpoint format and raw state_dict
+        data = torch.load(self.model_path, map_location=self.device, weights_only=False)
+        if isinstance(data, dict) and 'model_state_dict' in data:
+            # Checkpoint format from training
+            model.load_state_dict(data['model_state_dict'])
+        else:
+            # Raw state_dict format
+            model.load_state_dict(data)
+
         model.eval()
         return model
 
@@ -175,7 +188,7 @@ class StockfishEvaluator:
         board = chess.Board()
         model_color = chess.WHITE if model_plays_white else chess.BLACK
 
-        move_count = 0
+        ply_count = 0
         while not board.is_game_over():
             is_model_turn = board.turn == model_color
 
@@ -191,20 +204,25 @@ class StockfishEvaluator:
 
             if self.verbose:
                 player = "Model" if is_model_turn else f"Stockfish(L{skill_level})"
-                print(f"  {move_count + 1}. {player}: {move}")
+                move_num = (ply_count // 2) + 1
+                side = "." if board.turn == chess.WHITE else "..."
+                print(f"  {move_num}{side} {player}: {move}")
 
             board.push(move)
-            move_count += 1
+            ply_count += 1
 
         # Determine winner
         outcome = board.outcome()
         winner = outcome.winner if outcome else None
         termination = outcome.termination.name if outcome else "UNKNOWN"
 
+        # Convert ply count to full moves (round up for incomplete moves)
+        full_moves = (ply_count + 1) // 2
+
         return GameResult(
             winner=winner,
             model_color=model_color,
-            moves=move_count,
+            moves=full_moves,
             termination=termination,
         )
 
